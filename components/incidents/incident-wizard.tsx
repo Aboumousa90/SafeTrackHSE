@@ -118,14 +118,20 @@ export function IncidentWizard({
     if (!raw) return;
     try {
       const saved = JSON.parse(raw) as { form?: IncidentDraftForm; selectedCell?: SeverityCell; uploadedFiles?: UploadedFileRecord[] };
-      if (saved.form) setForm(saved.form);
+      if (saved.form) {
+        const validDeptIds = new Set(departments.map((d) => d.id));
+        const restoredDeptId = saved.form.departmentId && validDeptIds.has(saved.form.departmentId)
+          ? saved.form.departmentId
+          : departments[0]?.id ?? "";
+        setForm({ ...saved.form, departmentId: restoredDeptId });
+      }
       if (saved.selectedCell) setSelectedCell(saved.selectedCell);
       if (saved.uploadedFiles) setUploadedFiles(saved.uploadedFiles);
       setStatus(t.incident.restoredDraft);
     } catch {
       setStatus(t.incident.freshDraft);
     }
-  }, [t.incident.freshDraft, t.incident.restoredDraft]);
+  }, [t.incident.freshDraft, t.incident.restoredDraft, departments]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
