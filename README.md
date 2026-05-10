@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SafeTrack HSE
 
-## Getting Started
+SafeTrack is a multi-tenant HSE incident management platform built with Next.js 14, Supabase, Claude AI, PDF exports, Resend email, Web Push, PWA offline support, and NL/EN/FR foundations.
 
-First, run the development server:
+## Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev --hostname 127.0.0.1 --port 3010
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://127.0.0.1:3010/dashboard`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Verification
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Run static checks and production build:
 
-## Learn More
+```bash
+pnpm verify
+```
 
-To learn more about Next.js, take a look at the following resources:
+Run the route/API smoke suite against a running local server:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+pnpm smoke
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Override the target URL when needed:
 
-## Deploy on Vercel
+```bash
+$env:SAFETRACK_BASE_URL="https://your-preview-url"; pnpm smoke
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Production Readiness
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Use `/super-admin` or `/api/readiness` to review missing production configuration, including Supabase, Anthropic, Resend, Web Push VAPID keys, RLS migration status, PWA readiness, and reporting templates.

@@ -1,0 +1,21 @@
+{
+  "app": {
+    "name": "SafeTrack",
+    "dashboard": "Tableau de bord",
+    "incidents": "Incidents",
+    "analysis": "Analyse",
+    "measures": "Mesures",
+    "reports": "Rapports",
+    "settings": "Parametres"
+  },
+  "incident": {
+    "new": "Nouvel incident",
+    "severity": "Gravite",
+    "processSafetyEvent": "Evenement de securite des procedes",
+    "victim": "Victime"
+  },
+  "ai": {
+    "typing": "L'IA ecrit",
+    "rootCauseComplete": "ROOT CAUSE ANALYSIS COMPLETE"
+  }
+}

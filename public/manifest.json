@@ -1,0 +1,40 @@
+{
+  "name": "SafeTrack HSE",
+  "short_name": "SafeTrack",
+  "description": "HSE incident management and analytics",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F7FA",
+  "theme_color": "#1B4F72",
+  "categories": ["business", "productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "New incident",
+      "short_name": "Incident",
+      "description": "Register a new HSE incident",
+      "url": "/incidents/new",
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Proactive report",
+      "short_name": "Proactive",
+      "description": "Submit a near miss or safety observation",
+      "url": "/proactive",
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    }
+  ],
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

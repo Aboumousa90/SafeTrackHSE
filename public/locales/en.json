@@ -1,0 +1,21 @@
+{
+  "app": {
+    "name": "SafeTrack",
+    "dashboard": "Dashboard",
+    "incidents": "Incidents",
+    "analysis": "Analysis",
+    "measures": "Measures",
+    "reports": "Reports",
+    "settings": "Settings"
+  },
+  "incident": {
+    "new": "New incident",
+    "severity": "Severity",
+    "processSafetyEvent": "Process Safety Event",
+    "victim": "Victim"
+  },
+  "ai": {
+    "typing": "AI is typing",
+    "rootCauseComplete": "ROOT CAUSE ANALYSIS COMPLETE"
+  }
+}

@@ -3,25 +3,36 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f7fa;
+  --foreground: #17202a;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 204 62% 28%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--foreground);
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.industrial-grid {
+  background-image:
+    linear-gradient(rgba(27, 79, 114, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(27, 79, 114, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
