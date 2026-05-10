@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { Input, Label, Select, Textarea } from "@/components/ui/field";
-import { departments, severityMatrix, users } from "@/lib/seed-data";
-import type { SeverityCell } from "@/lib/types";
+import type { Department, SeverityCell, TenantUser } from "@/lib/types";
 import { queueOfflineDraft } from "@/lib/offline/drafts";
 import { generateReferenceNumber } from "@/lib/utils";
 
@@ -57,43 +56,61 @@ interface UploadedFileRecord {
   uploaded: boolean;
 }
 
-const initialForm: IncidentDraftForm = {
-  title: "",
-  incidentDate: "2026-05-09",
-  incidentTime: "09:35",
-  departmentId: departments[1]?.id ?? "",
-  involvedPersonName: "",
-  reporterName: "Elise Martens",
-  location: "",
-  locationDetail: "",
-  description: "",
-  undesiredEvent: "",
-  eventCategory: "process safety",
-  isVictim: true,
-  injuryLocation: "",
-  injuryType: "Chemical exposure",
-  isPse: true,
-  productName: "",
-  casNumber: "1310-73-2",
-  sdsUrl: "",
-  quantity: "",
-  unit: "L",
-  releaseDuration: "",
-  containmentStatus: "",
-  witnesses: "",
-};
+function makeInitialForm(firstDepartmentId: string, currentUserName: string): IncidentDraftForm {
+  return {
+    title: "",
+    incidentDate: new Date().toISOString().slice(0, 10),
+    incidentTime: "09:00",
+    departmentId: firstDepartmentId,
+    involvedPersonName: "",
+    reporterName: currentUserName,
+    location: "",
+    locationDetail: "",
+    description: "",
+    undesiredEvent: "",
+    eventCategory: "process safety",
+    isVictim: false,
+    injuryLocation: "",
+    injuryType: "Chemical exposure",
+    isPse: false,
+    productName: "",
+    casNumber: "",
+    sdsUrl: "",
+    quantity: "",
+    unit: "L",
+    releaseDuration: "",
+    containmentStatus: "",
+    witnesses: "",
+  };
+}
 
-export function IncidentWizard() {
+export function IncidentWizard({
+  departments,
+  users,
+  severityMatrix,
+  currentUserName,
+  companyPrefix,
+}: {
+  departments: Department[];
+  users: TenantUser[];
+  severityMatrix: SeverityCell[];
+  currentUserName: string;
+  companyPrefix: string;
+}) {
   const { t } = useLanguage();
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<IncidentDraftForm>(initialForm);
-  const [selectedCell, setSelectedCell] = useState<SeverityCell>(severityMatrix[16]);
+  const [form, setForm] = useState<IncidentDraftForm>(() =>
+    makeInitialForm(departments[0]?.id ?? "", currentUserName)
+  );
+  const [selectedCell, setSelectedCell] = useState<SeverityCell>(
+    severityMatrix[Math.floor(severityMatrix.length / 2)] ?? severityMatrix[0]
+  );
   const [status, setStatus] = useState<string>(t.incident.draftLoaded);
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileRecord[]>([]);
   const [submittedIncidentId, setSubmittedIncidentId] = useState<string>("draft");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const reference = useMemo(() => generateReferenceNumber("STC", 44), []);
+  const reference = useMemo(() => generateReferenceNumber(companyPrefix, 1), [companyPrefix]);
   const steps = [t.incident.basicFacts, t.incident.classification, t.incident.pseRelease, t.incident.attachments];
 
   useEffect(() => {
@@ -172,7 +189,7 @@ export function IncidentWizard() {
 
     const payload = {
       ...form,
-      companyPrefix: "STC",
+      companyPrefix,
       severityLevel: selectedCell.level,
       severityRationale: `${t.incident.likelihood} ${selectedCell.likelihood} ${t.incident.consequence} ${selectedCell.consequence} ${t.incident.mapsTo} ${selectedCell.level}.`,
       isUndesiredRelease: form.isPse,
