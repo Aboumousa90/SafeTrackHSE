@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Camera, Check, FileUp } from "lucide-react";
+import { Camera, Check, FileUp, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { Input, Label, Select, Textarea } from "@/components/ui/field";
+import type { IntakeSuggestion } from "@/lib/ai/intake";
 import type { Department, SeverityCell, TenantUser } from "@/lib/types";
 import { queueOfflineDraft } from "@/lib/offline/drafts";
 import { generateReferenceNumber } from "@/lib/utils";
@@ -97,8 +98,12 @@ export function IncidentWizard({
   currentUserName: string;
   companyPrefix: string;
 }) {
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const [step, setStep] = useState(0);
+  const [intakeFile, setIntakeFile] = useState<File | null>(null);
+  const [intakeNote, setIntakeNote] = useState("");
+  const [intakeHazards, setIntakeHazards] = useState<string[]>([]);
+  const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false);
   const [form, setForm] = useState<IncidentDraftForm>(() =>
     makeInitialForm(departments[0]?.id ?? "", currentUserName)
   );
@@ -143,6 +148,48 @@ export function IncidentWizard({
 
   function updateField<K extends keyof IncidentDraftForm>(field: K, value: IncidentDraftForm[K]) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function analyzePhoto() {
+    if (!intakeFile || isAnalyzingPhoto) return;
+
+    setIsAnalyzingPhoto(true);
+    setStatus(t.incident.aiIntakeAnalyzing);
+    try {
+      const body = new FormData();
+      body.append("file", intakeFile);
+      body.append("note", intakeNote);
+      body.append("language", locale);
+
+      const response = await fetch("/api/ai/incident-intake", { method: "POST", body });
+      const result = (await response.json()) as { suggestion?: IntakeSuggestion; error?: string };
+      if (!response.ok || !result.suggestion) {
+        setStatus(result.error ?? t.incident.aiIntakeFailed);
+        return;
+      }
+
+      applyIntakeSuggestion(result.suggestion);
+    } catch {
+      setStatus(t.incident.aiIntakeFailed);
+    } finally {
+      setIsAnalyzingPhoto(false);
+    }
+  }
+
+  function applyIntakeSuggestion(suggestion: IntakeSuggestion) {
+    // Prefill only what the reporter has not typed yet — never overwrite their words.
+    setForm((current) => ({
+      ...current,
+      title: current.title || suggestion.title,
+      description: current.description || suggestion.description,
+      location: current.location || suggestion.location,
+      eventCategory: suggestion.eventCategory,
+      isPse: current.isPse || suggestion.pseLikely,
+    }));
+    const matchingCell = severityMatrix.find((cell) => cell.level === suggestion.suggestedSeverity);
+    if (matchingCell) setSelectedCell(matchingCell);
+    setIntakeHazards(suggestion.observedHazards);
+    setStatus(`${t.incident.aiIntakeApplied} ${suggestion.severityRationale}`);
   }
 
   function saveLocalDraft(message = t.incident.savedLocally) {
@@ -278,6 +325,43 @@ export function IncidentWizard({
         <Card>
           <CardHeader><CardTitle>{t.incident.stepBasic}</CardTitle></CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 lg:col-span-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <p className="font-semibold text-primary">{t.incident.aiIntakeTitle}</p>
+              </div>
+              <p className="mt-1 text-sm text-slate-600">{t.incident.aiIntakeHelp}</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                <label className="flex h-10 cursor-pointer items-center gap-2 truncate rounded-md border border-dashed border-slate-300 bg-white px-3 text-sm font-semibold">
+                  <Camera className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate">{intakeFile ? intakeFile.name : t.incident.photos}</span>
+                  <input
+                    className="sr-only"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    capture="environment"
+                    onChange={(event) => setIntakeFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <Input
+                  value={intakeNote}
+                  onChange={(event) => setIntakeNote(event.target.value)}
+                  placeholder={t.incident.aiIntakeNotePlaceholder}
+                  aria-label={t.incident.aiIntakeNote}
+                />
+                <Button disabled={!intakeFile || isAnalyzingPhoto} onClick={() => void analyzePhoto()}>
+                  {isAnalyzingPhoto ? t.incident.aiIntakeAnalyzing : t.incident.aiIntakeButton}
+                </Button>
+              </div>
+              {intakeHazards.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs font-bold uppercase text-slate-500">{t.incident.observedHazards}</p>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {intakeHazards.map((hazard) => <Badge key={hazard} tone="amber">{hazard}</Badge>)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
             <div className="grid gap-2"><Label>{t.incident.incidentTitle}</Label><Input value={form.title} onChange={(event) => updateField("title", event.target.value)} /></div>
             <div className="grid gap-2"><Label>{t.incident.date}</Label><Input type="date" value={form.incidentDate} onChange={(event) => updateField("incidentDate", event.target.value)} /></div>
             <div className="grid gap-2"><Label>{t.incident.time}</Label><Input type="time" value={form.incidentTime} onChange={(event) => updateField("incidentTime", event.target.value)} /></div>

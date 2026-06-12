@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { executeRcaTool, rcaTools } from "@/lib/ai/rca-tools";
 import {
   ANALYSIS_COMPLETE_MARKER,
   buildRootCauseSystemBlocks,
@@ -40,39 +42,73 @@ export async function POST(request: Request) {
   await requireTenantCompanyId();
 
   const client = getAnthropicClient();
-  const stream = client.messages.stream({
-    model: CHAT_MODEL,
-    max_tokens: 2000,
-    system: buildRootCauseSystemBlocks({
-      incidentDescription: parsed.data.incident.description,
-      incidentDate: parsed.data.incident.date,
-      department: parsed.data.incident.department,
-      severityLevel: parsed.data.incident.severityLevel,
-      isPse: parsed.data.incident.isPse,
-      isVictim: parsed.data.incident.isVictim,
-      injuryLocation: parsed.data.incident.injuryLocation,
-      selectedMethod: parsed.data.method,
-      language: parsed.data.language,
-    }),
-    messages: normalizeConversation(parsed.data.messages, parsed.data.language),
+  const system = buildRootCauseSystemBlocks({
+    incidentDescription: parsed.data.incident.description,
+    incidentDate: parsed.data.incident.date,
+    department: parsed.data.incident.department,
+    severityLevel: parsed.data.incident.severityLevel,
+    isPse: parsed.data.incident.isPse,
+    isVictim: parsed.data.incident.isVictim,
+    injuryLocation: parsed.data.incident.injuryLocation,
+    selectedMethod: parsed.data.method,
+    language: parsed.data.language,
   });
 
   const encoder = new TextEncoder();
+  let cancelled = false;
+  const maxToolTurns = 5;
+
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const event of stream) {
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            controller.enqueue(encoder.encode(event.delta.text));
+        let conversation: Anthropic.MessageParam[] = normalizeConversation(parsed.data.messages, parsed.data.language);
+
+        for (let turn = 0; turn < maxToolTurns && !cancelled; turn++) {
+          const stream = client.messages.stream({
+            model: CHAT_MODEL,
+            max_tokens: 2000,
+            system,
+            tools: rcaTools,
+            messages: conversation,
+          });
+
+          let emittedText = false;
+          for await (const event of stream) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              controller.enqueue(encoder.encode(event.delta.text));
+              emittedText = true;
+            }
+          }
+
+          const finalMessage = await stream.finalMessage();
+          if (finalMessage.stop_reason !== "tool_use") break;
+
+          const toolResults: Anthropic.ToolResultBlockParam[] = finalMessage.content
+            .filter((block): block is Anthropic.ToolUseBlock => block.type === "tool_use")
+            .map((toolUse) => ({
+              type: "tool_result",
+              tool_use_id: toolUse.id,
+              content: executeRcaTool(toolUse.name, toolUse.input),
+            }));
+
+          conversation = [
+            ...conversation,
+            { role: "assistant", content: finalMessage.content },
+            { role: "user", content: toolResults },
+          ];
+
+          if (emittedText) {
+            controller.enqueue(encoder.encode("\n\n"));
           }
         }
+
         controller.close();
       } catch (error) {
         controller.error(error);
       }
     },
     cancel() {
-      stream.abort();
+      cancelled = true;
     },
   });
 

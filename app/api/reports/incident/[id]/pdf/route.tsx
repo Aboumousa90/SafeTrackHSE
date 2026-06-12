@@ -1,9 +1,9 @@
 import React from "react";
 import { NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { generateLessonsLearned } from "@/lib/ai/report";
+import { generateReportNarrative } from "@/lib/ai/report";
 import { IncidentReportDocument } from "@/lib/pdf/incident-report";
-import { analysisFinding, company, incidents, measures, users } from "@/lib/seed-data";
+import { analysisFinding, company, companyConfig, incidents, measures, users } from "@/lib/seed-data";
 import { requireTenantCompanyId } from "@/lib/supabase/tenant";
 import type { Locale } from "@/lib/types";
 
@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const langParam = new URL(request.url).searchParams.get("lang");
   const language: Locale = langParam === "nl" || langParam === "en" || langParam === "fr" ? langParam : author.language;
 
-  const { lessons } = await generateLessonsLearned({
+  const narrative = await generateReportNarrative({
     incident,
     finding: analysisFinding,
     measures: incidentMeasures,
@@ -26,11 +26,14 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const pdfBuffer = await renderToBuffer(
     <IncidentReportDocument
       company={company}
+      companyConfig={companyConfig}
       incident={incident}
       finding={analysisFinding}
       measures={incidentMeasures}
       author={author}
-      lessonsLearned={lessons}
+      executiveSummary={narrative.executiveSummary}
+      lessonsLearned={narrative.lessonsLearned}
+      language={language}
     />,
   );
 
