@@ -295,7 +295,7 @@ export function AnalysisWorkbench() {
     const response = await fetch("/api/measures/suggestions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ incidentId: incident.id, finding, language: locale }),
+      body: JSON.stringify({ incidentId: incident.id, incidentDescription: incident.description, finding, language: locale }),
     });
     const result = (await response.json()) as { suggestions?: SuggestedMeasure[]; error?: string };
     if (!response.ok || !result.suggestions) {
