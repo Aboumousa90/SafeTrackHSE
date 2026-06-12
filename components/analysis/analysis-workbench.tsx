@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { Input } from "@/components/ui/field";
+import { ANALYSIS_COMPLETE_MARKER } from "@/lib/ai/constants";
 import { analysisFinding, incidents } from "@/lib/seed-data";
 import type { AnalysisFinding, AnalysisMethod, SuggestedMeasure } from "@/lib/types";
 
@@ -148,6 +149,23 @@ export function AnalysisWorkbench() {
     window.localStorage.setItem(storageKey, JSON.stringify({ messages, finding, suggestions, savedAt: new Date().toISOString() }));
   }, [messages, finding, suggestions, storageKey]);
 
+  function buildRequestPayload(conversation: ChatMessage[]) {
+    return {
+      language: locale,
+      method,
+      incident: {
+        description: incident.description,
+        date: incident.incidentDate,
+        department: "Production Line A",
+        severityLevel: incident.severityLevel,
+        isPse: incident.isPse,
+        isVictim: incident.isVictim,
+        injuryLocation: incident.injuryLocation,
+      },
+      messages: conversation.map((message) => ({ role: message.role, content: message.content })),
+    };
+  }
+
   async function sendMessage() {
     const trimmed = input.trim();
     if (!trimmed || isTyping) return;
@@ -162,41 +180,70 @@ export function AnalysisWorkbench() {
       const response = await fetch("/api/ai/root-cause", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language: locale,
-          method,
-          incident: {
-            description: incident.description,
-            date: incident.incidentDate,
-            department: "Production Line A",
-            severityLevel: incident.severityLevel,
-            isPse: incident.isPse,
-            isVictim: incident.isVictim,
-            injuryLocation: incident.injuryLocation,
-          },
-          messages: nextMessages.map((message) => ({ role: message.role, content: message.content })),
-        }),
+        body: JSON.stringify(buildRequestPayload(nextMessages)),
       });
-      const result = (await response.json()) as { content?: string; error?: string; demoMode?: boolean; remaining?: number };
 
-      if (!response.ok || !result.content) {
-      setStatus(result.error ?? t.analysis.requestFailed);
-      return;
+      if (!response.ok || !response.body) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        setStatus(result?.error ?? t.analysis.requestFailed);
+        return;
       }
 
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: result.content ?? "" }]);
-      const parsedFinding = parseCompletedFinding(result.content);
-      if (parsedFinding) {
-        setFinding(parsedFinding);
-        setStatus(t.analysis.completed);
+      const demoMode = response.headers.get("X-SafeTrack-Demo") === "1";
+      const remaining = response.headers.get("X-RateLimit-Remaining") ?? "0";
+
+      const assistantId = crypto.randomUUID();
+      setMessages((current) => [...current, { id: assistantId, role: "assistant", content: "" }]);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let content = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        content += decoder.decode(value, { stream: true });
+        const snapshot = content;
+        setMessages((current) => current.map((message) => (message.id === assistantId ? { ...message, content: snapshot } : message)));
+      }
+      content += decoder.decode();
+      setMessages((current) => current.map((message) => (message.id === assistantId ? { ...message, content } : message)));
+
+      if (content.includes(ANALYSIS_COMPLETE_MARKER)) {
+        const completedConversation: ChatMessage[] = [...nextMessages, { id: assistantId, role: "assistant", content }];
+        await synthesizeFinding(completedConversation);
       } else {
-        setStatus(result.demoMode ? t.analysis.demoResponse : `${t.analysis.responseReceived} ${result.remaining ?? 0}.`);
+        setStatus(demoMode ? t.analysis.demoResponse : `${t.analysis.responseReceived} ${remaining}.`);
       }
     } catch {
       setStatus(t.analysis.requestFailed);
     } finally {
       setIsTyping(false);
     }
+  }
+
+  async function synthesizeFinding(conversation: ChatMessage[]) {
+    setStatus(
+      locale === "nl"
+        ? "Gestructureerde bevindingen samenstellen..."
+        : locale === "fr"
+          ? "Synthèse des constats structurés..."
+          : "Synthesising structured findings...",
+    );
+
+    const response = await fetch("/api/ai/root-cause/synthesize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildRequestPayload(conversation)),
+    });
+    const result = (await response.json().catch(() => null)) as { finding?: AnalysisFinding; error?: string } | null;
+
+    if (!response.ok || !result?.finding) {
+      setStatus(result?.error ?? t.analysis.requestFailed);
+      return;
+    }
+
+    setFinding(result.finding);
+    setStatus(t.analysis.completed);
   }
 
   async function exportPng() {
@@ -248,7 +295,7 @@ export function AnalysisWorkbench() {
     const response = await fetch("/api/measures/suggestions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ incidentId: incident.id, finding, language: locale }),
+      body: JSON.stringify({ incidentId: incident.id, incidentDescription: incident.description, finding, language: locale }),
     });
     const result = (await response.json()) as { suggestions?: SuggestedMeasure[]; error?: string };
     if (!response.ok || !result.suggestions) {
@@ -377,27 +424,6 @@ function createOpeningMessage(method: AnalysisMethod, locale: "nl" | "en" | "fr"
     role: "assistant",
     content: content[locale],
   };
-}
-
-function parseCompletedFinding(content: string): AnalysisFinding | null {
-  const marker = "ROOT CAUSE ANALYSIS COMPLETE";
-  if (!content.includes(marker)) return null;
-  const jsonStart = content.indexOf("{");
-  const jsonEnd = content.lastIndexOf("}");
-  if (jsonStart < 0 || jsonEnd < jsonStart) return null;
-
-  try {
-    const parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1)) as Partial<AnalysisFinding>;
-    if (!parsed.directCauses || !parsed.underlyingCauses || !parsed.rootCauses || !parsed.contributingFactors) return null;
-    return {
-      directCauses: parsed.directCauses,
-      underlyingCauses: parsed.underlyingCauses,
-      rootCauses: parsed.rootCauses,
-      contributingFactors: parsed.contributingFactors,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function renderVisual(method: AnalysisMethod, finding: AnalysisFinding, locale: "nl" | "en" | "fr") {

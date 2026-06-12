@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { enrichSnapshotWithAiInsights } from "@/lib/ai/insights";
 import { analyticsSnapshotToCsv } from "@/lib/analytics/snapshot";
-import { getDemoAnalyticsSnapshot } from "@/lib/analytics/data";
+import { getAnalyticsSnapshot } from "@/lib/analytics/source";
+import { requireTenantCompanyId } from "@/lib/supabase/tenant";
+import type { Locale } from "@/lib/types";
 
 function getPeriod(request: Request) {
   const url = new URL(request.url);
@@ -16,11 +19,12 @@ function getPeriod(request: Request) {
 
 export async function GET(request: Request) {
   const period = getPeriod(request);
-  const snapshot = getDemoAnalyticsSnapshot(period.year, period.month);
   const url = new URL(request.url);
+  const companyId = await requireTenantCompanyId();
+  const { snapshot: baseSnapshot, dataSource } = await getAnalyticsSnapshot(companyId, period.year, period.month);
 
   if (url.searchParams.get("format") === "csv") {
-    return new Response(analyticsSnapshotToCsv(snapshot), {
+    return new Response(analyticsSnapshotToCsv(baseSnapshot), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="hse-snapshot-${period.year}-${String(period.month).padStart(2, "0")}.csv"`,
@@ -28,5 +32,9 @@ export async function GET(request: Request) {
     });
   }
 
-  return NextResponse.json({ snapshot, demoMode: true });
+  const langParam = url.searchParams.get("lang");
+  const language: Locale = langParam === "nl" || langParam === "en" || langParam === "fr" ? langParam : "en";
+  const snapshot = await enrichSnapshotWithAiInsights(baseSnapshot, language);
+
+  return NextResponse.json({ snapshot, dataSource, demoMode: dataSource === "demo" || !process.env.ANTHROPIC_API_KEY });
 }
