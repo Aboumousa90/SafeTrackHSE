@@ -13,13 +13,13 @@ export function OfflineSyncStatus() {
   const [message, setMessage] = useState("");
   const [online, setOnline] = useState(true);
 
-  function refreshDrafts() {
-    setDrafts(readOfflineDrafts());
-  }
+  const refreshDrafts = useCallback(() => {
+    void readOfflineDrafts().then(setDrafts);
+  }, []);
 
   const syncDrafts = useCallback(async () => {
     if (!navigator.onLine || syncing) return;
-    const queued = readOfflineDrafts();
+    const queued = await readOfflineDrafts();
     if (queued.length === 0) return;
 
     setSyncing(true);
@@ -29,7 +29,7 @@ export function OfflineSyncStatus() {
     const failed = results.length - synced;
     setMessage(failed > 0 ? `${synced} draft(s) synced, ${failed} still queued.` : `${synced} offline draft(s) synced.`);
     setSyncing(false);
-  }, [syncing]);
+  }, [syncing, refreshDrafts]);
 
   useEffect(() => {
     refreshDrafts();
@@ -40,17 +40,15 @@ export function OfflineSyncStatus() {
       void syncDrafts();
     };
     const markOffline = () => setOnline(false);
-    window.addEventListener("storage", refresh);
     window.addEventListener("online", syncWhenOnline);
     window.addEventListener("offline", markOffline);
     window.addEventListener("safetrack:offline-drafts", refresh);
     return () => {
-      window.removeEventListener("storage", refresh);
       window.removeEventListener("online", syncWhenOnline);
       window.removeEventListener("offline", markOffline);
       window.removeEventListener("safetrack:offline-drafts", refresh);
     };
-  }, [syncDrafts]);
+  }, [syncDrafts, refreshDrafts]);
 
   if (drafts.length === 0 && !message) return null;
 

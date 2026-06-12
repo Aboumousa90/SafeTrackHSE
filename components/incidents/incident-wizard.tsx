@@ -250,7 +250,7 @@ export function IncidentWizard({
     };
 
     if (!navigator.onLine) {
-      queueOfflineDraft(payload);
+      await queueOfflineDraft(payload);
       setStatus(t.incident.queuedOffline);
       return;
     }
@@ -283,7 +283,7 @@ export function IncidentWizard({
           : "Notifications queued.";
       setStatus(`Draft submitted as ${result.referenceNumber}. ${notificationText}`);
     } catch {
-      queueOfflineDraft(payload);
+      await queueOfflineDraft(payload);
       setStatus(t.incident.networkQueued);
     } finally {
       setIsSubmitting(false);

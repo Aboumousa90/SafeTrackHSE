@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Photo exceeds the 4.5MB limit for AI analysis" }, { status: 400 });
   }
 
-  const rate = checkAiRateLimit(await resolveUserId());
+  const rate = await checkAiRateLimit(await resolveUserId());
   if (!rate.allowed) {
     return NextResponse.json({ error: "AI rate limit exceeded" }, { status: 429 });
   }

@@ -1,15 +1,16 @@
 import { AnalyticsWorkspace } from "@/components/analytics/analytics-workspace";
 import { enrichSnapshotWithAiInsights } from "@/lib/ai/insights";
-import { getDemoAnalyticsSnapshot } from "@/lib/analytics/data";
+import { getAnalyticsSnapshot } from "@/lib/analytics/source";
 import { getCurrentTenant } from "@/lib/supabase/tenant";
 
-// AI insights are generated per request (with a short server-side cache),
-// so this page must not be statically prerendered at build time.
+// Live tenant data and AI insights are fetched per request (with a short
+// server-side cache), so this page must not be statically prerendered.
 export const dynamic = "force-dynamic";
 
 export default async function AnalyticsPage() {
   const tenant = await getCurrentTenant();
-  const snapshot = await enrichSnapshotWithAiInsights(getDemoAnalyticsSnapshot(2026, 5), tenant.user.language);
+  const { snapshot } = await getAnalyticsSnapshot(tenant.company.id, 2026, 5);
+  const enriched = await enrichSnapshotWithAiInsights(snapshot, tenant.user.language);
 
-  return <AnalyticsWorkspace snapshot={snapshot} />;
+  return <AnalyticsWorkspace snapshot={enriched} />;
 }

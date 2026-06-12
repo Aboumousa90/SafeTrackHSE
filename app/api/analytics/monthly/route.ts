@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { enrichSnapshotWithAiInsights } from "@/lib/ai/insights";
 import { analyticsSnapshotToCsv } from "@/lib/analytics/snapshot";
-import { getDemoAnalyticsSnapshot } from "@/lib/analytics/data";
+import { getAnalyticsSnapshot } from "@/lib/analytics/source";
+import { requireTenantCompanyId } from "@/lib/supabase/tenant";
 import type { Locale } from "@/lib/types";
 
 function getPeriod(request: Request) {
@@ -19,7 +20,8 @@ function getPeriod(request: Request) {
 export async function GET(request: Request) {
   const period = getPeriod(request);
   const url = new URL(request.url);
-  const baseSnapshot = getDemoAnalyticsSnapshot(period.year, period.month);
+  const companyId = await requireTenantCompanyId();
+  const { snapshot: baseSnapshot, dataSource } = await getAnalyticsSnapshot(companyId, period.year, period.month);
 
   if (url.searchParams.get("format") === "csv") {
     return new Response(analyticsSnapshotToCsv(baseSnapshot), {
@@ -34,5 +36,5 @@ export async function GET(request: Request) {
   const language: Locale = langParam === "nl" || langParam === "en" || langParam === "fr" ? langParam : "en";
   const snapshot = await enrichSnapshotWithAiInsights(baseSnapshot, language);
 
-  return NextResponse.json({ snapshot, demoMode: !process.env.ANTHROPIC_API_KEY });
+  return NextResponse.json({ snapshot, dataSource, demoMode: dataSource === "demo" || !process.env.ANTHROPIC_API_KEY });
 }

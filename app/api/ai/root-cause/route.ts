@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   }
 
   const userId = await resolveUserId();
-  const rate = checkAiRateLimit(userId);
+  const rate = await checkAiRateLimit(userId);
   if (!rate.allowed) {
     return NextResponse.json({ error: "AI rate limit exceeded" }, { status: 429 });
   }
@@ -83,13 +83,15 @@ export async function POST(request: Request) {
           const finalMessage = await stream.finalMessage();
           if (finalMessage.stop_reason !== "tool_use") break;
 
-          const toolResults: Anthropic.ToolResultBlockParam[] = finalMessage.content
-            .filter((block): block is Anthropic.ToolUseBlock => block.type === "tool_use")
-            .map((toolUse) => ({
-              type: "tool_result",
-              tool_use_id: toolUse.id,
-              content: executeRcaTool(toolUse.name, toolUse.input),
-            }));
+          const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
+            finalMessage.content
+              .filter((block): block is Anthropic.ToolUseBlock => block.type === "tool_use")
+              .map(async (toolUse) => ({
+                type: "tool_result" as const,
+                tool_use_id: toolUse.id,
+                content: await executeRcaTool(toolUse.name, toolUse.input),
+              })),
+          );
 
           conversation = [
             ...conversation,
