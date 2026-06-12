@@ -1,27 +1,25 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildRootCauseSystemPrompt, getAnthropicClient } from "@/lib/ai/claude";
+import {
+  ANALYSIS_COMPLETE_MARKER,
+  buildRootCauseSystemBlocks,
+  CHAT_MODEL,
+  getAnthropicClient,
+  normalizeConversation,
+  rootCauseRequestSchema,
+} from "@/lib/ai/claude";
 import { checkAiRateLimit } from "@/lib/ai/rate-limit";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { requireTenantCompanyId } from "@/lib/supabase/tenant";
 
-const bodySchema = z.object({
-  language: z.enum(["nl", "en", "fr"]),
-  method: z.enum(["5why", "fishbone", "fmea", "pareto", "fault_tree", "scatter"]),
-  incident: z.object({
-    description: z.string().min(20),
-    date: z.string(),
-    department: z.string(),
-    severityLevel: z.string(),
-    isPse: z.boolean(),
-    isVictim: z.boolean(),
-    injuryLocation: z.string().nullable(),
-  }),
-  messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })),
-});
+function textResponse(content: string, headers: Record<string, string>) {
+  return new Response(content, {
+    headers: { "Content-Type": "text/plain; charset=utf-8", ...headers },
+  });
+}
 
 export async function POST(request: Request) {
-  const parsed = bodySchema.safeParse(await request.json());
+  const parsed = rootCauseRequestSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -32,38 +30,60 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "AI rate limit exceeded" }, { status: 429 });
   }
 
+  const rateHeaders = { "X-RateLimit-Remaining": String(rate.remaining) };
+
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({
-      content: createFallbackReply(parsed.data.method, parsed.data.messages.length, parsed.data.language),
-      remaining: rate.remaining,
-      demoMode: true,
-    });
+    const reply = createFallbackReply(parsed.data.method, parsed.data.messages.length, parsed.data.language);
+    return textResponse(reply, { ...rateHeaders, "X-SafeTrack-Demo": "1" });
   }
 
   await requireTenantCompanyId();
 
   const client = getAnthropicClient();
-  const system = buildRootCauseSystemPrompt({
-    incidentDescription: parsed.data.incident.description,
-    incidentDate: parsed.data.incident.date,
-    department: parsed.data.incident.department,
-    severityLevel: parsed.data.incident.severityLevel,
-    isPse: parsed.data.incident.isPse,
-    isVictim: parsed.data.incident.isVictim,
-    injuryLocation: parsed.data.incident.injuryLocation,
-    selectedMethod: parsed.data.method,
-    language: parsed.data.language,
+  const stream = client.messages.stream({
+    model: CHAT_MODEL,
+    max_tokens: 2000,
+    system: buildRootCauseSystemBlocks({
+      incidentDescription: parsed.data.incident.description,
+      incidentDate: parsed.data.incident.date,
+      department: parsed.data.incident.department,
+      severityLevel: parsed.data.incident.severityLevel,
+      isPse: parsed.data.incident.isPse,
+      isVictim: parsed.data.incident.isVictim,
+      injuryLocation: parsed.data.incident.injuryLocation,
+      selectedMethod: parsed.data.method,
+      language: parsed.data.language,
+    }),
+    messages: normalizeConversation(parsed.data.messages, parsed.data.language),
   });
 
-  const message = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1200,
-    system,
-    messages: parsed.data.messages,
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const event of stream) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            controller.enqueue(encoder.encode(event.delta.text));
+          }
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel() {
+      stream.abort();
+    },
   });
 
-  const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
-  return NextResponse.json({ content: text, remaining: rate.remaining });
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...rateHeaders,
+      "X-SafeTrack-Demo": "0",
+    },
+  });
 }
 
 async function resolveUserId() {
@@ -79,30 +99,19 @@ async function resolveUserId() {
   return user?.id ?? "anonymous";
 }
 
-function createFallbackReply(method: z.infer<typeof bodySchema>["method"], messageCount: number, language: z.infer<typeof bodySchema>["language"]) {
+function createFallbackReply(
+  method: z.infer<typeof rootCauseRequestSchema>["method"],
+  messageCount: number,
+  language: z.infer<typeof rootCauseRequestSchema>["language"],
+) {
   if (messageCount >= 7) {
-    const completed = {
-      nl: `ROOT CAUSE ANALYSIS COMPLETE
-{
-  "directCauses": ["De slangkoppeling was niet volledig vergrendeld", "De operator stond binnen de spat- of blootstellingszone"],
-  "underlyingCauses": ["De controle voor gebruik vereiste geen trekproef op de koppeling", "De werkinstructie voor transfer beschreef de verificatie van tijdelijke slangen onvoldoende"],
-  "rootCauses": ["De onderhoudscriteria voor vervanging van transferkoppelingen waren onvolledig", "Leidinggevende verificatie van tijdelijke chemische transfers was inconsistent"],
-  "contributingFactors": ["Tijdsdruk bij batchstart", "Gelaatsscherm was beschikbaar maar niet gedragen bij de eerste aansluiting"]
-}`,
-      en: `ROOT CAUSE ANALYSIS COMPLETE
-{
-  "directCauses": ["Hose coupling was not fully locked", "Operator was positioned inside the splash zone"],
-  "underlyingCauses": ["The pre-use inspection did not require a coupling tug test", "The transfer SOP did not define temporary hose verification"],
-  "rootCauses": ["Maintenance replacement criteria for transfer hose couplings were incomplete", "Supervisory verification of temporary chemical transfer setups was inconsistent"],
-  "contributingFactors": ["Batch start time pressure", "Face shield was available but not worn during initial connection"]
-}`,
-      fr: `ROOT CAUSE ANALYSIS COMPLETE
-{
-  "directCauses": ["Le raccord du flexible n'etait pas completement verrouille", "L'operateur se trouvait dans la zone d'eclaboussure"],
-  "underlyingCauses": ["Le controle avant utilisation n'imposait pas de test de traction du raccord", "La procedure de transfert ne definissait pas assez la verification des flexibles temporaires"],
-  "rootCauses": ["Les criteres de remplacement des raccords de transfert etaient incomplets", "La verification par la supervision des montages temporaires de transfert chimique etait inconstante"],
-  "contributingFactors": ["Pression temporelle au demarrage du lot", "L'ecran facial etait disponible mais non porte lors du raccordement initial"]
-}`,
+    const completed: Record<typeof language, string> = {
+      nl: `${ANALYSIS_COMPLETE_MARKER}
+De directe oorzaken zijn een niet volledig vergrendelde slangkoppeling en een operator binnen de spatzone. Onderliggend ontbraken een trekproef in de controle voor gebruik en een duidelijke verificatie van tijdelijke slangen in de werkinstructie. De basisoorzaken liggen in onvolledige vervangingscriteria voor transferkoppelingen en inconsistente verificatie van tijdelijke transfers door leidinggevenden. Tijdsdruk bij batchstart en het niet dragen van het beschikbare gelaatsscherm droegen bij.`,
+      en: `${ANALYSIS_COMPLETE_MARKER}
+The direct causes are a hose coupling that was not fully locked and an operator positioned inside the splash zone. Underlying this, the pre-use inspection did not require a coupling tug test and the transfer SOP did not define temporary hose verification. The root causes are incomplete maintenance replacement criteria for transfer hose couplings and inconsistent supervisory verification of temporary chemical transfer setups. Batch start time pressure and the face shield not being worn during initial connection were contributing factors.`,
+      fr: `${ANALYSIS_COMPLETE_MARKER}
+Les causes directes sont un raccord de flexible incomplètement verrouillé et un opérateur positionné dans la zone d'éclaboussure. En sous-jacent, le contrôle avant utilisation n'imposait pas de test de traction et la procédure de transfert ne définissait pas la vérification des flexibles temporaires. Les causes racines sont des critères de remplacement incomplets pour les raccords de transfert et une vérification inconstante des montages temporaires par la supervision. La pression temporelle au démarrage du lot et le non-port de l'écran facial disponible ont contribué.`,
     };
     return completed[language];
   }
@@ -142,66 +151,66 @@ function createFallbackReply(method: z.infer<typeof bodySchema>["method"], messa
     },
     en: {
       "5why": [
-      "Why did the coupling loosen during the transfer?",
-      "Why was the expected verification step not performed?",
-      "Why did the SOP not include that verification step?",
+        "Why did the coupling loosen during the transfer?",
+        "Why was the expected verification step not performed?",
+        "Why did the SOP not include that verification step?",
       ],
       fishbone: [
-      "For the Method branch, what procedure should have prevented this release?",
-      "For the Machine branch, what was the condition of the hose and locking tabs?",
-      "For the Management branch, how often are temporary transfer setups verified?",
+        "For the Method branch, what procedure should have prevented this release?",
+        "For the Machine branch, what was the condition of the hose and locking tabs?",
+        "For the Management branch, how often are temporary transfer setups verified?",
       ],
       fmea: [
-      "Which function failed first: containment, connection integrity, inspection, or operator positioning?",
-      "What severity, occurrence, and detection scores would you assign to coupling release?",
-      "Which control would most reduce the RPN?",
+        "Which function failed first: containment, connection integrity, inspection, or operator positioning?",
+        "What severity, occurrence, and detection scores would you assign to coupling release?",
+        "Which control would most reduce the RPN?",
       ],
       pareto: [
-      "Across similar events, which cause category appears most often?",
-      "How many comparable transfer incidents involved procedure gaps?",
-      "Which cause category should be addressed first for the largest risk reduction?",
+        "Across similar events, which cause category appears most often?",
+        "How many comparable transfer incidents involved procedure gaps?",
+        "Which cause category should be addressed first for the largest risk reduction?",
       ],
       fault_tree: [
-      "What top event should we place at the head of the fault tree?",
-      "Was the release caused by an AND combination of coupling failure and exposure, or either event alone?",
-      "Which basic events sit below the coupling failure branch?",
+        "What top event should we place at the head of the fault tree?",
+        "Was the release caused by an AND combination of coupling failure and exposure, or either event alone?",
+        "Which basic events sit below the coupling failure branch?",
       ],
       scatter: [
-      "Which two variables should we compare for correlation?",
-      "Do exposure hours, number of transfers, or overdue inspections best explain the pattern?",
-      "What data points should be excluded as outliers?",
+        "Which two variables should we compare for correlation?",
+        "Do exposure hours, number of transfers, or overdue inspections best explain the pattern?",
+        "What data points should be excluded as outliers?",
       ],
     },
     fr: {
       "5why": [
-        "Pourquoi le raccord s'est-il desserre pendant le transfert ?",
-        "Pourquoi l'etape de verification attendue n'a-t-elle pas ete realisee ?",
-        "Pourquoi la procedure ne contenait-elle pas cette etape de verification ?",
+        "Pourquoi le raccord s'est-il desserré pendant le transfert ?",
+        "Pourquoi l'étape de vérification attendue n'a-t-elle pas été réalisée ?",
+        "Pourquoi la procédure ne contenait-elle pas cette étape de vérification ?",
       ],
       fishbone: [
-        "Pour la branche Methode, quelle procedure aurait du prevenir ce rejet ?",
-        "Pour la branche Equipement, quel etait l'etat du flexible et des ergots de verrouillage ?",
-        "A quelle frequence les montages temporaires de transfert sont-ils verifies par la supervision ?",
+        "Pour la branche Méthode, quelle procédure aurait dû prévenir ce rejet ?",
+        "Pour la branche Équipement, quel était l'état du flexible et des ergots de verrouillage ?",
+        "À quelle fréquence les montages temporaires de transfert sont-ils vérifiés par la supervision ?",
       ],
       fmea: [
-        "Quelle fonction a echoue en premier : confinement, integrite du raccord, inspection ou positionnement de l'operateur ?",
-        "Quels scores de gravite, occurrence et detection attribueriez-vous au desserrage du raccord ?",
-        "Quelle mesure de maitrise reduirait le plus le RPN ?",
+        "Quelle fonction a échoué en premier : confinement, intégrité du raccord, inspection ou positionnement de l'opérateur ?",
+        "Quels scores de gravité, occurrence et détection attribueriez-vous au desserrage du raccord ?",
+        "Quelle mesure de maîtrise réduirait le plus le RPN ?",
       ],
       pareto: [
-        "Dans les evenements similaires, quelle categorie de cause revient le plus souvent ?",
-        "Combien d'incidents de transfert comparables impliquaient des lacunes de procedure ?",
-        "Quelle categorie de cause faut-il traiter en premier pour reduire le risque au maximum ?",
+        "Dans les événements similaires, quelle catégorie de cause revient le plus souvent ?",
+        "Combien d'incidents de transfert comparables impliquaient des lacunes de procédure ?",
+        "Quelle catégorie de cause faut-il traiter en premier pour réduire le risque au maximum ?",
       ],
       fault_tree: [
-        "Quel evenement sommet devons-nous placer en haut de l'arbre des defaillances ?",
-        "Le rejet est-il du a une combinaison ET entre defaillance du raccord et exposition, ou a l'un des deux seuls ?",
-        "Quels evenements de base se trouvent sous la branche defaillance du raccord ?",
+        "Quel événement sommet devons-nous placer en haut de l'arbre des défaillances ?",
+        "Le rejet est-il dû à une combinaison ET entre défaillance du raccord et exposition, ou à l'un des deux seuls ?",
+        "Quels événements de base se trouvent sous la branche défaillance du raccord ?",
       ],
       scatter: [
-        "Quelles deux variables devons-nous comparer pour rechercher une correlation ?",
-        "Les heures d'exposition, le nombre de transferts ou les inspections en retard expliquent-ils le mieux le schema ?",
-        "Quels points de donnees doivent etre exclus comme valeurs aberrantes ?",
+        "Quelles deux variables devons-nous comparer pour rechercher une corrélation ?",
+        "Les heures d'exposition, le nombre de transferts ou les inspections en retard expliquent-ils le mieux le schéma ?",
+        "Quels points de données doivent être exclus comme valeurs aberrantes ?",
       ],
     },
   };

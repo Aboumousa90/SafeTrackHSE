@@ -90,12 +90,14 @@ export function IncidentReportDocument({
   finding,
   measures,
   author,
+  lessonsLearned,
 }: {
   company: Company;
   incident: Incident;
   finding: AnalysisFinding;
   measures: Measure[];
   author: TenantUser;
+  lessonsLearned: string[];
 }) {
   return (
     <Document title={`${incident.referenceNumber} report`} author={author.fullName}>
@@ -155,10 +157,14 @@ export function IncidentReportDocument({
           ))}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Lessons Learned</Text>
-          <Text style={styles.paragraph}>Temporary transfer setups require explicit verification, clear hose replacement criteria, and visible supervision before transfer starts.</Text>
-        </View>
+        {lessonsLearned.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Lessons Learned</Text>
+            {lessonsLearned.map((lesson, index) => (
+              <Text key={index} style={styles.paragraph}>• {lesson}</Text>
+            ))}
+          </View>
+        ) : null}
 
         <Text style={styles.footer}>SafeTrack HSE · Report date {new Date().toISOString().slice(0, 10)} · Confidential tenant data</Text>
       </Page>

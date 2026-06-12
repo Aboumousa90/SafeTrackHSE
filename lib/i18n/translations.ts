@@ -66,7 +66,7 @@ export const translations = {
       due: "Vervalt op",
     },
     analysis: {
-      badge: "Claude Sonnet 4-route gereed",
+      badge: "Claude Sonnet 4.6-route gereed",
       title: "AI-ondersteunde oorzaakanalyse",
       description: "Geleid interview, gestructureerde synthese en exporteerbare methodevisualisaties.",
       methodSelection: "Methodekeuze",
@@ -380,7 +380,7 @@ export const translations = {
       due: "Due",
     },
     analysis: {
-      badge: "Claude Sonnet 4 route-ready",
+      badge: "Claude Sonnet 4.6 route-ready",
       title: "AI-assisted root cause analysis",
       description: "Guided interview, structured synthesis, and exportable method visualisations.",
       methodSelection: "Method selection",
@@ -694,7 +694,7 @@ export const translations = {
       due: "Echeance",
     },
     analysis: {
-      badge: "Route Claude Sonnet 4 prete",
+      badge: "Route Claude Sonnet 4.6 prete",
       title: "Analyse des causes racines assistee par IA",
       description: "Entretien guide, synthese structuree et visualisations exportables.",
       methodSelection: "Choix de methode",
